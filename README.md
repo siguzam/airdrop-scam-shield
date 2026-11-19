@@ -15,14 +15,15 @@ stages, each running where it makes the most sense.
 | Stage | Where it runs | Why there |
 | --- | --- | --- |
 | 1. Instant pre-check | In the browser, no network | Deterministic pattern matching (seed phrase requests, send-to-get doubling, fake verification, urgency tricks) answers in milliseconds and costs nothing. |
-| 2. Quick triage | On-device with Gemini Nano via Firebase AI Logic (`PREFER_ON_DEVICE`) | Private, free, and works offline. The model judges the message with a single-turn structured JSON prompt. If the device has no on-device model, Firebase AI Logic falls back to the cloud automatically. |
-| 3. Deep analysis | In the cloud with Gemini via Firebase AI Logic (`PREFER_IN_CLOUD`) | Only runs when the user clicks for it. If the input holds a BSC contract address, the app first reads live on-chain facts (source verification, token data, DEX liquidity) and feeds them to the strongest model. |
+| 2. Quick triage | On-device with Gemini Nano via Firebase AI Logic (`PREFER_ON_DEVICE`) | Private, free, and works offline. The model judges the message with a single-turn structured JSON prompt. If the device has no on-device model, the app falls back to the free Gemini Developer API in the cloud. |
+| 3. Deep analysis | In the cloud with Gemini via the free Gemini Developer API (REST, `gemini-2.0-flash`) | Only runs when the user clicks for it. If the input holds a BSC contract address, the app first reads live on-chain facts (source verification, token data, DEX liquidity) and feeds them to the strongest model. No Firebase AI Logic cloud, no paid plan. |
 
-The result card always shows a prominent badge with the real
-`inferenceSource` value returned by Firebase AI Logic: **ON_DEVICE**
-(Gemini Nano, answered privately on this device) or **IN_CLOUD** (cloud
-fallback). That badge is the core of the hybrid story: the same SDK, the
-same prompt shape, and the runtime decides where the work happens.
+The result card always shows a prominent badge with the real source of
+the answer: **ON_DEVICE** (Gemini Nano, answered privately on this
+device) or **IN_CLOUD** (free Gemini Developer API cloud fallback). That
+badge is the core of the hybrid story: the same prompt shape, and the
+runtime decides where the work happens — on-device first, free cloud
+when the device cannot do it.
 
 On-device inference works on Chrome Desktop v139 and newer and covers
 single-turn text generation, including structured JSON output.
@@ -34,12 +35,15 @@ single-turn text generation, including structured JSON output.
 - Stage 2 quick triage with `InferenceMode.PREFER_ON_DEVICE` and structured
   JSON output. The on-device model is warmed up with
   `initializeDeviceModel` after the user clicks Scan, with a progress bar.
-- Stage 3 deep analysis with `InferenceMode.PREFER_IN_CLOUD`, on user click.
-  When a BSC address is present, the app fetches read-only on-chain facts
-  from public BSC RPCs (with fallbacks), checks source verification on
-  Sourcify, and reads trading pairs and liquidity from DexScreener.
-- Scan history saved in `localStorage`. No backend beyond Firebase AI Logic
-  and App Check.
+  If the device has no on-device model, triage falls back to the free
+  Gemini Developer API (`gemini-2.0-flash`, direct REST call).
+- Stage 3 deep analysis with the free Gemini Developer API
+  (`gemini-2.0-flash`), on user click. When a BSC address is present, the
+  app fetches read-only on-chain facts from public BSC RPCs (with
+  fallbacks), checks source verification on Sourcify, and reads trading
+  pairs and liquidity from DexScreener.
+- Scan history saved in `localStorage`. No backend beyond Firebase (App
+  Check) and the free Gemini Developer API.
 - Clean, fast, mobile-friendly UI in English.
 
 ## Run locally
@@ -51,8 +55,10 @@ npm run dev
 
 Open http://localhost:5173.
 
-Stage 1 works with no setup at all. Stages 2 and 3 need a Firebase project
-(see below). Without it the app runs in demo mode and says so clearly.
+Stage 1 works with no setup at all. Stage 2 on-device needs a Firebase
+project (see below); the cloud fallback needs a free Gemini Developer API
+key (see below). Without either, the app runs in demo mode and says so
+clearly.
 
 ## Add your Firebase config
 
@@ -78,6 +84,25 @@ VITE_RECAPTCHA_SITE_KEY=...
 ```
 
 4. Restart the dev server.
+
+## Add your free Gemini Developer API key (cloud fallback)
+
+The cloud fallback (and deep analysis) call the Gemini Developer API
+directly — no Firebase AI Logic cloud, no paid Blaze plan.
+
+1. Get a free key at Google AI Studio: https://aistudio.google.com
+   (create an API key; the free tier is enough for this demo).
+2. In `.env.local`, set:
+
+```env
+VITE_GEMINI_API_KEY=your-gemini-developer-api-key
+```
+
+3. Restart the dev server (or rebuild for a hosted demo).
+
+The key is a browser-side key, so for a public demo restrict it in
+Google AI Studio (API restrictions: Generative Language API only, and an
+HTTP referrer restriction to your demo domain).
 
 ## Register the App Check debug token (local dev)
 
@@ -123,7 +148,9 @@ src/
 
 - Vite + React + TypeScript
 - `firebase` v13 (`firebase/ai`: `getAI`, `getGenerativeModel`,
-  `GoogleAIBackend`, `InferenceMode`)
+  `GoogleAIBackend`, `InferenceMode`) for on-device Gemini Nano
+- Gemini Developer API (`gemini-2.0-flash`) via direct `fetch` for the
+  free cloud fallback and deep analysis
 - Firebase App Check (reCAPTCHA v3, debug token in dev)
 - Public BSC RPCs, Sourcify API, DexScreener API (read-only)
 

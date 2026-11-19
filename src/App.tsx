@@ -1,6 +1,10 @@
 import { useState } from "react";
-import { isFirebaseConfigured } from "./firebase";
-import { deepAnalysis, quickTriage, warmupDeviceModel } from "./ai";
+import {
+  deepAnalysis,
+  isAiAvailable,
+  quickTriage,
+  warmupDeviceModel,
+} from "./ai";
 import {
   extractBscAddress,
   fetchOnChainFacts,
@@ -35,6 +39,9 @@ const CONTRACT_SAMPLE =
 function friendlyError(e: unknown): string {
   const msg = e instanceof Error ? e.message : "Unknown error.";
   if (msg.includes("Firebase is not configured")) {
+    return msg;
+  }
+  if (msg.includes("VITE_GEMINI_API_KEY")) {
     return msg;
   }
   if (/app check/i.test(msg)) {
@@ -109,7 +116,7 @@ export default function App() {
     const localResult = localPreCheck(text);
     setLocal(localResult);
 
-    if (!isFirebaseConfigured) {
+    if (!isAiAvailable) {
       setPhase("done");
       storeEntry(entryId, text, localResult, null, null, null);
       return;
@@ -251,7 +258,8 @@ export default function App() {
           <p>
             Gemini Nano judges the message on your device through Firebase AI
             Logic. Free, private, and offline. No on-device model? It falls
-            back to the cloud and the badge says so.
+            back to the free Gemini Developer API in the cloud and the badge
+            says so.
           </p>
         </div>
         <div className="step">
@@ -265,14 +273,15 @@ export default function App() {
         </div>
       </section>
 
-      {!isFirebaseConfigured && (
+      {!isAiAvailable && (
         <div className="notice">
-          <strong>Demo mode: Firebase is not configured.</strong>
+          <strong>Demo mode: AI is not configured.</strong>
           <p>
             Stage 1 instant pre-check works without any setup. To enable the
-            AI stages, copy <code>.env.example</code> to{" "}
-            <code>.env.local</code> and fill in your Firebase web app values.
-            See the README for the steps.
+            AI stages, set <code>VITE_GEMINI_API_KEY</code> in{" "}
+            <code>.env.local</code> (free key from Google AI Studio) for the
+            cloud fallback, and/or add your Firebase web app values for
+            on-device Gemini Nano. See the README for the steps.
           </p>
         </div>
       )}
@@ -456,8 +465,8 @@ export default function App() {
           sending funds.
         </p>
         <p>
-          Hybrid AI: on-device Gemini Nano first, cloud Gemini when needed —
-          powered by Firebase AI Logic.
+          Hybrid AI: on-device Gemini Nano first, cloud Gemini (free Gemini
+          Developer API) when needed.
         </p>
       </footer>
     </div>

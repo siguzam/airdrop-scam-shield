@@ -3,8 +3,37 @@ import {
   InferenceMode,
   Schema,
 } from "firebase/ai";
-import { getFirebaseAI } from "./firebase";
+import { getFirebaseAI, isFirebaseConfigured } from "./firebase";
 import type { InferenceSource, TriageResult, Verdict } from "./types";
+
+/**
+ * Free Gemini Developer API (Google AI Studio) — the cloud fallback.
+ * The Firebase AI Logic cloud path (Vertex AI) needs the paid Blaze plan,
+ * so the cloud fallback calls the Gemini Developer API directly instead
+ * of going through Firebase AI Logic. Get a free key at
+ * https://aistudio.google.com and set VITE_GEMINI_API_KEY in .env.local.
+ */
+const GEMINI_MODEL = "gemini-2.0-flash";
+const GEMINI_API_URL = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`;
+
+export const isGeminiApiConfigured = Boolean(
+  (import.meta.env.VITE_GEMINI_API_KEY as string | undefined)?.trim(),
+);
+
+/** True when at least one AI path is available: on-device (Firebase) or cloud (Gemini API key). */
+export const isAiAvailable = isFirebaseConfigured || isGeminiApiConfigured;
+
+function getGeminiApiKey(): string {
+  const key =
+    (import.meta.env.VITE_GEMINI_API_KEY as string | undefined)?.trim() ??
+    "";
+  if (!key) {
+    throw new Error(
+      "Gemini Developer API key is not set. Copy .env.example to .env.local and set VITE_GEMINI_API_KEY (get a free key at Google AI Studio: https://aistudio.google.com), then rebuild.",
+    );
+  }
+  return key;
+}
 
 const triageSchema = Schema.object({
   properties: {
@@ -34,6 +63,42 @@ const triageSchema = Schema.object({
     }),
   },
 });
+
+/** Same response shape as triageSchema, as a plain JSON Schema object for the Gemini REST API. */
+const geminiResponseSchema = {
+  type: "OBJECT",
+  properties: {
+    score: {
+      type: "INTEGER",
+      description: "Risk score from 0 (safe) to 100 (certain scam).",
+    },
+    verdict: {
+      type: "STRING",
+      enum: ["SAFE", "SUSPICIOUS", "DANGER"],
+      description: "Overall verdict for the pasted message.",
+    },
+    flags: {
+      type: "ARRAY",
+      items: {
+        type: "OBJECT",
+        properties: {
+          label: { type: "STRING", description: "Short name of the red flag." },
+          explanation: {
+            type: "STRING",
+            description:
+              "One or two sentences explaining why this is suspicious.",
+          },
+        },
+      },
+      description: "List of red flags found in the message.",
+    },
+    summary: {
+      type: "STRING",
+      description:
+        "Two or three sentences summarizing the risk for a non-technical user.",
+    },
+  },
+};
 
 function normalizeSource(raw: unknown): InferenceSource {
   const text = String(raw ?? "").toUpperCase();
@@ -127,10 +192,57 @@ function buildDeepPrompt(
 }
 
 /**
+ * Cloud fallback: one direct call to the free Gemini Developer API
+ * (REST, model gemini-2.0-flash). No Firebase AI Logic, no Blaze plan.
+ * Returns the parsed triage JSON; the caller sets source/modelLabel.
+ */
+async function callGeminiDeveloperApi(
+  prompt: string,
+): Promise<Omit<TriageResult, "source" | "modelLabel">> {
+  const key = getGeminiApiKey();
+  const res = await fetch(GEMINI_API_URL, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "x-goog-api-key": key,
+    },
+    body: JSON.stringify({
+      contents: [{ parts: [{ text: prompt }] }],
+      generationConfig: {
+        responseMimeType: "application/json",
+        responseSchema: geminiResponseSchema,
+      },
+    }),
+  });
+  if (!res.ok) {
+    let detail = "";
+    try {
+      const errJson = (await res.json()) as { error?: { message?: string } };
+      detail = errJson.error?.message ?? "";
+    } catch {
+      // Ignore a non-JSON error body.
+    }
+    throw new Error(
+      `Gemini Developer API request failed (HTTP ${res.status})${detail ? `: ${detail}` : ""}`,
+    );
+  }
+  const json = (await res.json()) as {
+    candidates?: { content?: { parts?: { text?: string }[] } }[];
+  };
+  const text = json.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
+  if (!text) {
+    throw new Error(
+      "Gemini Developer API returned an empty answer. Please try again.",
+    );
+  }
+  return parseTriageJson(text);
+}
+
+/**
  * Warm up the on-device model (Gemini Nano) after a user click, so the first
  * triage prompt does not pay the download cost. Returns true when the
  * on-device model is ready, false when this device cannot run it. A false
- * result is not an error: PREFER_ON_DEVICE falls back to the cloud.
+ * result is not an error: quickTriage falls back to the cloud.
  */
 export async function warmupDeviceModel(
   onProgress: (progress: number) => void,
@@ -148,58 +260,65 @@ export async function warmupDeviceModel(
 }
 
 /**
- * Quick triage: one short prompt, PREFER_ON_DEVICE. Runs on Gemini Nano when
- * the device supports it and falls back to the cloud otherwise. The returned
- * `source` field says which one actually answered.
+ * Quick triage: on-device Gemini Nano first (Firebase AI Logic
+ * PREFER_ON_DEVICE). When the device has no on-device model, or the
+ * Firebase cloud path fails, fall back to the free Gemini Developer API.
+ * The returned `source` field says which one actually answered.
  */
 export async function quickTriage(
   input: string,
   localFlags: string[],
 ): Promise<TriageResult> {
-  const ai = getFirebaseAI();
-  const model = getGenerativeModel(ai, {
-    mode: InferenceMode.PREFER_ON_DEVICE,
-    generationConfig: {
-      responseMimeType: "application/json",
-      responseSchema: triageSchema,
-    },
-  });
-  const result = await model.generateContent(buildTriagePrompt(input, localFlags));
-  const source = normalizeSource(result.response.inferenceSource);
-  const parsed = parseTriageJson(result.response.text());
+  if (isFirebaseConfigured) {
+    try {
+      const ai = getFirebaseAI();
+      const model = getGenerativeModel(ai, {
+        mode: InferenceMode.PREFER_ON_DEVICE,
+        generationConfig: {
+          responseMimeType: "application/json",
+          responseSchema: triageSchema,
+        },
+      });
+      const result = await model.generateContent(buildTriagePrompt(input, localFlags));
+      const source = normalizeSource(result.response.inferenceSource);
+      const parsed = parseTriageJson(result.response.text());
+      return {
+        ...parsed,
+        source,
+        modelLabel:
+          source === "ON_DEVICE" ? "Gemini Nano (on-device)" : "Gemini (cloud fallback)",
+      };
+    } catch {
+      // On-device unavailable, or the Firebase cloud fallback failed
+      // (e.g. the Vertex AI API is not enabled on the free Spark plan).
+      // Fall through to the free Gemini Developer API below.
+    }
+  }
+
+  const parsed = await callGeminiDeveloperApi(buildTriagePrompt(input, localFlags));
   return {
     ...parsed,
-    source,
-    modelLabel:
-      source === "ON_DEVICE" ? "Gemini Nano (on-device)" : "Gemini (cloud fallback)",
+    source: "IN_CLOUD",
+    modelLabel: "Gemini (cloud fallback)",
   };
 }
 
 /**
- * Deep analysis: runs in the cloud on purpose, because it needs the strongest
- * model and the live on-chain facts gathered before the call.
+ * Deep analysis: runs in the cloud on purpose, because it needs the
+ * strongest model and the live on-chain facts gathered before the call.
+ * Uses the free Gemini Developer API (no Firebase AI Logic, no Blaze).
  */
 export async function deepAnalysis(
   input: string,
   onChainFactsText: string | null,
   localFlags: string[],
 ): Promise<TriageResult> {
-  const ai = getFirebaseAI();
-  const model = getGenerativeModel(ai, {
-    mode: InferenceMode.PREFER_IN_CLOUD,
-    generationConfig: {
-      responseMimeType: "application/json",
-      responseSchema: triageSchema,
-    },
-  });
-  const result = await model.generateContent(
+  const parsed = await callGeminiDeveloperApi(
     buildDeepPrompt(input, onChainFactsText, localFlags),
   );
-  const source = normalizeSource(result.response.inferenceSource);
-  const parsed = parseTriageJson(result.response.text());
   return {
     ...parsed,
-    source,
+    source: "IN_CLOUD",
     modelLabel: "Gemini (cloud)",
   };
 }
