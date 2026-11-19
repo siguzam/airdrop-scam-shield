@@ -13,7 +13,7 @@ import type { InferenceSource, TriageResult, Verdict } from "./types";
  * of going through Firebase AI Logic. Get a free key at
  * https://aistudio.google.com and set VITE_GEMINI_API_KEY in .env.local.
  */
-const GEMINI_MODEL = "gemini-2.0-flash";
+const GEMINI_MODEL = "gemini-3.8-flash";
 const GEMINI_API_URL = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`;
 
 export const isGeminiApiConfigured = Boolean(
@@ -193,7 +193,7 @@ function buildDeepPrompt(
 
 /**
  * Cloud fallback: one direct call to the free Gemini Developer API
- * (REST, model gemini-2.0-flash). No Firebase AI Logic, no Blaze plan.
+ * (REST, model gemini-3.8-flash). No Firebase AI Logic, no Blaze plan.
  * Returns the parsed triage JSON; the caller sets source/modelLabel.
  */
 async function callGeminiDeveloperApi(
