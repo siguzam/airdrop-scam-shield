@@ -1,0 +1,15 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+dist-ssr/
+
+# Environment files (Firebase config lives here, never commit it)
+.env
+.env.local
+.env.*.local
+
+# Logs and editor files
+*.log
+.DS_Store
