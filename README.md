@@ -57,7 +57,8 @@ Stage 1 works with no setup at all. Stages 2 and 3 need a Firebase project
 ## Add your Firebase config
 
 1. In the Firebase console, create a project (or reuse one) and register a
-   Web app. Enable **Firebase AI Logic** for the project.
+   Web app. Enable **Firebase AI Logic** for the project. (The project for
+   this submission already exists: `airdrop-scam-shield`.)
 2. In the Firebase console, go to **App Check** and register a reCAPTCHA v3
    provider. Copy the site key.
 3. Copy `.env.example` to `.env.local` and fill in the values:

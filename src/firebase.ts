@@ -23,7 +23,7 @@ export const isFirebaseConfigured = Boolean(
 );
 
 let app: FirebaseApp | null = null;
-let ai: FirebaseAI | null = null;
+let ai: ReturnType<typeof getAI> | null = null;
 
 if (isFirebaseConfigured) {
   app = initializeApp(firebaseConfig);
@@ -47,7 +47,7 @@ if (isFirebaseConfigured) {
   ai = getAI(app, { backend: new GoogleAIBackend() });
 }
 
-export function getFirebaseAI(): FirebaseAI {
+export function getFirebaseAI(): ReturnType<typeof getAI> {
   if (!ai) {
     throw new Error(
       "Firebase is not configured. Copy .env.example to .env.local and fill in your Firebase web app values, then restart the dev server.",

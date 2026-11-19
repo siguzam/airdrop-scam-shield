@@ -30,14 +30,26 @@ const RULES: LocalRule[] = [
     id: "seed-phrase",
     label: "Asks for seed phrase or private key",
     severity: "high",
-    weight: 40,
+    weight: 70,
     explanation:
-      "No legitimate airdrop ever asks for your seed phrase or private key. Anyone with them can empty your wallet instantly.",
-    test: (input) =>
-      firstMatch(
-        input,
-        /seed\s*phrase|private\s*key|mnemonic|12\s*words|recovery\s*phrase/i,
-      ),
+      "No legitimate airdrop ever asks for your seed phrase or private key. Anyone with them can empty your wallet instantly. Warnings that tell you never to share them do not trigger this flag.",
+    test: (input) => {
+      // Check sentence by sentence so that warnings such as
+      // "Never share your seed phrase" do not trigger the flag.
+      const sentences = input.split(/(?<=[.!?])\s+/);
+      for (const s of sentences) {
+        if (/(never|don't|do not|keep your|protect your)/i.test(s)) {
+          continue;
+        }
+        const m = s.match(
+          /(share|send|enter|provide|give|submit|reveal|paste|type|input|confirm|verify|import).{0,50}(seed\s*phrase|private\s*key|mnemonic|recovery\s*phrase)|(seed\s*phrase|private\s*key|mnemonic|recovery\s*phrase).{0,50}(share|send|enter|provide|give|submit|reveal|paste|type|input|confirm|verify|import)/i,
+        );
+        if (m) {
+          return m[0].slice(0, 120);
+        }
+      }
+      return null;
+    },
   },
   {
     id: "send-to-get",
@@ -53,7 +65,7 @@ const RULES: LocalRule[] = [
       );
       const back = firstMatch(
         input,
-        /get\s+back|receive\s+back|double|2x|twice\s+the\s+amount/i,
+        /get\s+back|receive\s+back|get\s+\d[\d.,]*\s*(bnb|eth|usdt|usdc|sol|trx|ton)?\s*back|double|2x|twice\s+the\s+amount/i,
       );
       return send && back ? `${send} + ${back}` : null;
     },
