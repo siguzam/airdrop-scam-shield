@@ -39,10 +39,18 @@ if (isFirebaseConfigured) {
 
   const siteKey =
     (import.meta.env.VITE_RECAPTCHA_SITE_KEY as string | undefined) ?? "";
-  initializeAppCheck(app, {
-    provider: new ReCaptchaV3Provider(siteKey || "PLACEHOLDER_RECAPTCHA_SITE_KEY"),
-    isTokenAutoRefreshEnabled: true,
-  });
+  if (siteKey) {
+    initializeAppCheck(app, {
+      provider: new ReCaptchaV3Provider(siteKey),
+      isTokenAutoRefreshEnabled: true,
+    });
+  } else {
+    // No reCAPTCHA site key configured (public demo without App Check
+    // enforcement): skip App Check entirely so the page makes no failing
+    // reCAPTCHA request. The Gemini Developer API fallback does not need
+    // App Check.
+    console.info("App Check skipped: no reCAPTCHA site key configured.");
+  }
 
   ai = getAI(app, { backend: new GoogleAIBackend() });
 }
